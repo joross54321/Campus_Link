@@ -1,0 +1,100 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user (Student, Professor, or Registrar)",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "Unique identifiers for students, faculty codes for professors" },
+        "surname": { "type": "string" },
+        "firstName": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "professor", "registrar"] },
+        "college": { "type": "string" },
+        "program": { "type": "string" },
+        "yearLevel": { "type": "number" },
+        "address": { "type": "string" },
+        "contact": { "type": "string" },
+        "maxUnits": { "type": "number", "description": "Default is 30" }
+      },
+      "required": ["studentId", "surname", "role"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "A course subject offered by the university",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "title": { "type": "string" },
+        "units": { "type": "number" },
+        "prerequisites": { "type": "array", "items": { "type": "string" } },
+        "yearLevel": { "type": "number" },
+        "semester": { "type": "string", "enum": ["1", "2", "Summer"] },
+        "status": { "type": "string", "enum": ["open", "full"] },
+        "college": { "type": "string" }
+      },
+      "required": ["code", "title", "units"]
+    },
+    "Enrollment": {
+      "title": "Enrollment",
+      "description": "Student enrollment in a subject",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "semester": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "dropped"] },
+        "requestedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "subjectId", "academicYear", "semester", "status"]
+    },
+    "Grade": {
+      "title": "Grade",
+      "description": "Student grade for a subject",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "professorId": { "type": "string" },
+        "grade": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "posted"] },
+        "academicYear": { "type": "string" },
+        "semester": { "type": "string" }
+      },
+      "required": ["userId", "subjectId", "professorId", "grade", "status"]
+    },
+    "SystemConfig": {
+      "title": "System Config",
+      "description": "Global system settings",
+      "type": "object",
+      "properties": {
+        "currentSemester": { "type": "string" },
+        "currentAcademicYear": { "type": "string" },
+        "midtermDate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["currentSemester", "currentAcademicYear"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "All system users"
+    },
+    "subjects": {
+      "schema": "Subject",
+      "description": "Available subjects"
+    },
+    "enrollments": {
+      "schema": "Enrollment",
+      "description": "Student enrollment records"
+    },
+    "grades": {
+      "schema": "Grade",
+      "description": "Student grades"
+    },
+    "system/config": {
+      "schema": "SystemConfig",
+      "description": "Global system configuration"
+    }
+  }
+}

@@ -1,0 +1,282 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    /** Enrollment docs may use auth uid or campus studentId as userId. */
+    function isEnrollmentOwner(enrollmentUserId) {
+      return isSignedIn() && (
+        request.auth.uid == enrollmentUserId ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          getUserData(request.auth.uid).studentId == enrollmentUserId
+        )
+      );
+    }
+
+    function getUserData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function userHasRegistrarRole(userDocId) {
+      return exists(/databases/$(database)/documents/users/$(userDocId)) &&
+        get(/databases/$(database)/documents/users/$(userDocId)).data.role == 'registrar';
+    }
+
+    function isRegistrar() {
+      return isSignedIn() && (
+        userHasRegistrarRole(request.auth.uid) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          getUserData(request.auth.uid).studentId is string &&
+          userHasRegistrarRole(getUserData(request.auth.uid).studentId)
+        )
+      );
+    }
+
+    /** Link users/{auth.uid} to an existing campus registrar profile (bootstrap / reseed). */
+    function isRegistrarAuthProfileSync(profileUid) {
+      return isOwner(profileUid) &&
+        incoming().role == 'registrar' &&
+        incoming().studentId is string &&
+        userHasRegistrarRole(incoming().studentId);
+    }
+
+    function isProfessor() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             getUserData(request.auth.uid).role == 'professor';
+    }
+
+    function isStudent() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             getUserData(request.auth.uid).role == 'student';
+    }
+
+    function isDev() {
+      return isSignedIn() && (
+        request.auth.token.email == 'jorosssimon96@gmail.com' ||
+        request.auth.token.email == 'reg-2026-001@campuslink.isatu.edu.ph'
+      );
+    }
+
+    function isInitializer() {
+      return isDev() || !exists(/databases/$(database)/documents/system/config);
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidUser(data) {
+      return data.studentId is string && data.studentId.size() <= 64 &&
+             data.surname is string && data.surname.size() <= 100 &&
+             data.role in ['student', 'professor', 'registrar'] &&
+             (!('firstName' in data) || (data.firstName is string && data.firstName.size() <= 100)) &&
+             (!('maxUnits' in data) || (data.maxUnits is number)) &&
+             (!('address' in data) || (data.address is string && data.address.size() <= 500)) &&
+             (!('contact' in data) || (data.contact is string && data.contact.size() <= 100)) &&
+             (!('college' in data) || (data.college is string)) &&
+             (!('yearLevel' in data) || (data.yearLevel is number));
+    }
+
+    function isValidSubject(data) {
+      return data.code is string && data.code.size() <= 20 &&
+             data.title is string && data.title.size() <= 200 &&
+             data.units is number && data.units >= 1 && data.units <= 10 &&
+             data.semester in ['1', '2', 'Summer'] &&
+             data.status in ['open', 'full'] &&
+             (!('prerequisites' in data) || (data.prerequisites is list)) &&
+             (!('yearLevel' in data) || (data.yearLevel is number)) &&
+             (!('college' in data) || (data.college is string)) &&
+             (!('section' in data) || (data.section is string)) &&
+             (!('sectionCapacity' in data) || (data.sectionCapacity is int && data.sectionCapacity >= 1)) &&
+             (!('courseCapacity' in data) || (data.courseCapacity is int && data.courseCapacity >= 1)) &&
+             (!('id' in data) || (data.id is string));
+    }
+
+    function isValidEnrollment(data) {
+      return data.userId is string && data.subjectId is string &&
+             data.academicYear is string && data.semester is string &&
+             data.status in ['pending', 'approved', 'dropped', 'pending_drop', 'rejected'] &&
+             (!('requestType' in data) || data.requestType in ['initial', 'add', 'drop']);
+    }
+
+    function isValidGrade(data) {
+      return data.userId is string && data.subjectId is string &&
+             data.professorId is string && data.grade is number &&
+             data.grade >= 1.0 && data.grade <= 5.0 &&
+             data.status in ['posted', 'pending'] &&
+             data.academicYear is string && data.semester is string;
+    }
+
+    match /users/{userId} {
+      // Doc id matches studentId (e.g. users/22-001): allow read for login bootstrap before Auth exists
+      allow get: if isOwner(userId) || isRegistrar() || isProfessor() || isDev()
+        || resource.data.studentId == userId;
+      allow list: if isRegistrar() || isDev() || isInitializer() || isStudentIdLoginQuery() || isAuthUidSelfLookup();
+      allow create: if (isOwner(userId) || isRegistrar() || isInitializer()) && isValidUser(incoming());
+      allow update: if (
+        (isRegistrar() || isDev()) && isValidUser(incoming()) ||
+        isRegistrarAuthProfileSync(userId) ||
+        (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['address', 'contact', 'surname']) && isValidUser(incoming())) ||
+        (isOwner(userId) && isValidUser(incoming()) && !('role' in resource.data) && incoming().role in ['student', 'professor', 'registrar'])
+      );
+      allow delete: if isRegistrar() || isDev();
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if isSignedIn();
+      allow create, update: if (isRegistrar() || isInitializer()) && isValidSubject(incoming());
+      allow delete: if isRegistrar() || isDev();
+    }
+
+    match /enrollments/{enrollmentId} {
+      allow read: if isEnrollmentOwner(resource.data.userId) || isRegistrar() || isDev() || (isProfessor() && isProfessorManaged(resource.data.subjectId));
+      allow list: if isSignedIn();
+      allow create: if (isRegistrar() || isInitializer() || (isStudent() && isEnrollmentOwner(incoming().userId))) && 
+                    isValidEnrollment(incoming()) &&
+                    (isRegistrar() || isInitializer() || (incoming().status == 'pending' &&
+                    get(/databases/$(database)/documents/subjects/$(incoming().subjectId)).data.status == 'open'));
+      allow update: if (
+        (isRegistrar() || isDev()) && isValidEnrollment(incoming()) ||
+        (isEnrollmentOwner(existing().userId) && isStudent() && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['status']) && 
+         (incoming().status == 'dropped' || incoming().status == 'pending_drop') &&
+         isBeforeDropLock())
+      );
+      allow delete: if isRegistrar() || isDev();
+    }
+
+    match /grades/{gradeId} {
+      allow read: if (isStudent() && isOwner(resource.data.userId) && resource.data.status == 'posted') ||
+                     isRegistrar() || isDev() ||
+                     (isProfessor() && isProfessorManaged(resource.data.subjectId));
+      allow create, update: if (isRegistrar() || isDev()) && isValidGrade(incoming());
+      allow delete: if isRegistrar() || isDev();
+    }
+
+    function semesterEndDatePassed(data) {
+      let end = data.semesterEndDate;
+      return end is string && end.size() >= 10
+        && request.time > timestamp.date(int(end[0:4]), int(end[5:7]), int(end[8:10]));
+    }
+
+    function automationNotDisabledInData(data) {
+      return !('semesterAutomationEnabled' in data)
+        || data.semesterAutomationEnabled != false;
+    }
+
+    function expectedSemesterAfterCurrent(current) {
+      let sem = string(current);
+      return sem == '1' ? '2'
+        : sem == '2' ? 'Summer'
+        : '1';
+    }
+
+    function expectedYearAfterRoll(currentSem, yearStr) {
+      return string(currentSem) == 'Summer' ? nextAcademicYearString(yearStr) : yearStr;
+    }
+
+    function nextAcademicYearString(yr) {
+      let start = int(yr[0:4]);
+      return string(start + 1) + '-' + string(start + 2);
+    }
+
+    /** Not user-initiated: client attempts this on load; rules gate what may commit. */
+    function isPublicSemesterRolloverUpdate(existing, next) {
+      let affected = next.diff(existing).affectedKeys();
+      return affected.hasOnly([
+        'currentSemester', 'currentAcademicYear', 'semesterStartDate', 'semesterEndDate',
+        'enrollmentStartDate', 'enrollmentEndDate', 'midtermDate', 'dropLockDate',
+        'enrollmentOpen', 'lastTransitionAt', 'transitionedBy'
+      ]) &&
+        semesterEndDatePassed(existing) &&
+        automationNotDisabledInData(existing) &&
+        next.currentSemester == expectedSemesterAfterCurrent(existing.currentSemester) &&
+        next.currentAcademicYear == expectedYearAfterRoll(existing.currentSemester, existing.currentAcademicYear) &&
+        next.enrollmentOpen == false &&
+        next.transitionedBy == 'auto' &&
+        next.lastTransitionAt is string;
+    }
+
+    match /system/config {
+      allow read: if true;
+      allow create: if isRegistrar() || isInitializer();
+      allow update: if (isRegistrar() || isInitializer()) ||
+        (isSignedIn() &&
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          isPublicSemesterRolloverUpdate(resource.data, request.resource.data));
+      allow delete: if false;
+    }
+
+    function isBeforeDropLock() {
+      let config = get(/databases/$(database)/documents/system/config).data;
+      return config.allowPostEnrollmentDrops == true ||
+        !('dropLockDate' in config) || request.time < timestamp.date(
+          int(config.dropLockDate[0:4]),
+          int(config.dropLockDate[5:7]),
+          int(config.dropLockDate[8:10])
+        );
+    }
+
+    function isStudentIdLoginQuery() {
+      return request.auth == null
+        && request.query.filters.size() == 1
+        && request.query.filters[0].field.path == ['studentId']
+        && request.query.filters[0].op == '==';
+    }
+
+    function isAuthUidSelfLookup() {
+      return isSignedIn()
+        && request.query.filters.size() == 1
+        && request.query.filters[0].field.path == ['authUid']
+        && request.query.filters[0].op == '=='
+        && request.query.filters[0].value == request.auth.uid;
+    }
+
+    function isProfessorManaged(subjectId) {
+      let subject = get(/databases/$(database)/documents/subjects/$(subjectId)).data;
+      let prof = getUserData(request.auth.uid);
+      return subject.professorId == request.auth.uid ||
+        ('handlingSections' in prof &&
+          prof.handlingSections is list &&
+          'section' in subject &&
+          subject.section in prof.handlingSections);
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isRegistrar() || isDev();
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && incoming().diff(resource).affectedKeys().hasOnly(['read'])
+        && incoming().read == true;
+      allow delete: if isRegistrar() || isDev();
+    }
+
+    match /admin_logs/{logId} {
+      allow read: if isRegistrar() || isDev();
+      allow create: if isRegistrar() || isDev();
+      allow update: if false;
+      allow delete: if isRegistrar() || isDev();
+    }
+  }
+}

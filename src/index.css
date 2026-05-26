@@ -1,0 +1,83 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Semantic palette (single source of truth) */
+  --color-primary: #001F3D;
+  --color-primary-foreground: #FFFFFF;
+  --color-accent: #C5A059;
+  --color-accent-foreground: #001F3D;
+  --color-background: #F8F9FA;
+  --color-surface: #FFFFFF;
+  --color-foreground: #0A0A0A;
+  --color-muted: #64748B;
+  --color-muted-foreground: #94A3B8;
+  --color-border: #E2E8F0;
+  --color-success: #1E4D3A;
+  --color-success-muted: #E8F2ED;
+  --color-danger: #7A2E2E;
+  --color-danger-muted: #F5E8E8;
+  --color-warning: #5C4A1F;
+  --color-warning-muted: #F5F0E6;
+
+  /* Legacy aliases (map to semantic tokens) */
+  --color-brand-blue: #001F3D;
+  --color-brand-gold: #C5A059;
+  --color-brand-paper: #F8F9FA;
+  --color-brand-ink: #0A0A0A;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-accent/30;
+  }
+
+  /* react-hot-toast default SVGs can collapse without explicit sizing */
+  [role='status'] svg,
+  .react-hot-toast svg {
+    width: 1.25rem;
+    height: 1.25rem;
+    flex-shrink: 0;
+  }
+}
+
+@keyframes screen-wobble {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  25% {
+    transform: translate3d(-3px, 0, 0) rotate(-0.12deg);
+  }
+  50% {
+    transform: translate3d(3px, 0, 0) rotate(0.12deg);
+  }
+  75% {
+    transform: translate3d(-1px, 0, 0);
+  }
+}
+
+@keyframes screen-flicker {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  35% {
+    opacity: 0.12;
+  }
+  70% {
+    opacity: 0.04;
+  }
+}
+
+.animate-screen-wobble {
+  animation: screen-wobble 0.42s ease-out;
+}
+
+.animate-screen-flicker {
+  animation: screen-flicker 0.5s ease-out;
+}
